@@ -20,7 +20,8 @@
   },
   "dependencies": {
     "commander": "^12.1.0",
-    "fastify": "^5.0.0"
+    "fastify": "^5.0.0",
+    "undici": "^7.26.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
