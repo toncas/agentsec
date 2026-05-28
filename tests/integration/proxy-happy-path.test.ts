@@ -152,4 +152,29 @@ describe("proxy happy-path", () => {
     expect(upstream.captured[0]!.body).toEqual(body);
     expect(upstream.captured[1]!.body).toEqual(body);
   });
+
+  it("heap does not grow > 5 MB across 100 sequential requests (T1.2)", async () => {
+    const body = { system: "s", messages: [{ role: "user", content: "x" }] };
+    const opts = {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    };
+
+    // Warm-up: settle JIT and connection pool before measuring.
+    for (let i = 0; i < 5; i++) {
+      const r = await fetch(`${proxy.url}/v1/messages`, opts);
+      await r.text();
+    }
+
+    const before = process.memoryUsage().heapUsed;
+
+    for (let i = 0; i < 100; i++) {
+      const r = await fetch(`${proxy.url}/v1/messages`, opts);
+      await r.text(); // must consume body so the stream is released
+    }
+
+    const deltaMB = (process.memoryUsage().heapUsed - before) / 1024 / 1024;
+    expect(deltaMB).toBeLessThan(5);
+  });
 });
