@@ -1,0 +1,10 @@
+port: 7777
+sensitivity: balanced  # strict | balanced | permissive
+quarantine_timeout_sec: 60
+project: ""            # overrides CWD-hash project_id
+cloud:
+  enabled: false
+  api_url: https://agentsec.dev/api
+  api_key: ""          # also accepts AGENTSEC_CLOUD_API_KEY env
+  webhook_url: ""
+  webhook_format: generic  # telegram | slack | generic
