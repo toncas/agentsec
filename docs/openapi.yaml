@@ -1,0 +1,385 @@
+openapi: 3.1.0
+info:
+  title: AgentSec Cloud API
+  version: 0.1.0
+  description: |
+    AgentSec Cloud API. Used by Pro and Team tiers for policy distribution,
+    encrypted event sync, and the hosted dashboard.
+
+    **The local AgentSec proxy NEVER calls this API in detection.** The proxy
+    is fully self-contained. This API is strictly for opt-in centralised
+    policy + audit log aggregation.
+
+    **All event payloads contain only allow-listed metadata.** Raw prompt
+    content NEVER traverses this API. See FR-16 in requirements.md.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  contact:
+    name: AgentSec
+    url: https://github.com/agentsec/agentsec
+
+servers:
+  - url: https://agentsec.dev/api
+    description: Production
+  - url: http://localhost:3000/api
+    description: Local development
+
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/login:
+    post:
+      summary: Email + password login (dashboard only)
+      security: []
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password, minLength: 12 }
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokens'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /auth/refresh:
+    post:
+      summary: Exchange refresh token for new access token
+      security: []
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '200':
+          description: Refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokens'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/health:
+    get:
+      summary: Liveness probe
+      security: []
+      tags: [system]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok] }
+                  version: { type: string }
+
+  /v1/baselines:
+    get:
+      summary: List baselines for the authenticated team
+      tags: [baselines]
+      parameters:
+        - in: query
+          name: project_id
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: List
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/BaselineSummary' }
+    post:
+      summary: Upload a baseline summary (NOT raw prompt content)
+      description: |
+        The local proxy uploads only the SHA-256 hash of the approved prompt
+        and the approval metadata. Raw prompt content is NEVER sent.
+      tags: [baselines]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BaselineSummary' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BaselineSummary' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /v1/policies:
+    get:
+      summary: List active policies for the authenticated team
+      tags: [policies]
+      responses:
+        '200':
+          description: List
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Policy' }
+    post:
+      summary: Create or update a policy
+      tags: [policies]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PolicyInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Policy' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /v1/events:
+    get:
+      summary: List recent quarantine events
+      tags: [events]
+      parameters:
+        - in: query
+          name: project_id
+          schema: { type: string }
+        - in: query
+          name: since
+          schema: { type: string, format: date-time }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        '200':
+          description: List
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Event' }
+    post:
+      summary: Upload a batch of quarantine events (metadata only)
+      description: |
+        Allow-listed fields only. The server rejects any payload containing
+        keys outside the allow-list defined in FR-16.
+      tags: [events]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [events]
+              properties:
+                events:
+                  type: array
+                  items: { $ref: '#/components/schemas/EventInput' }
+                  minItems: 1
+                  maxItems: 500
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted: { type: integer }
+                  rejected: { type: integer }
+                  errors:
+                    type: array
+                    items: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /v1/events/{id}/decision:
+    put:
+      summary: Override a quarantine decision from the dashboard
+      tags: [events]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision:
+                  type: string
+                  enum: [approved, blocked]
+                note: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Event' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    AuthTokens:
+      type: object
+      required: [access_token, refresh_token, token_type, expires_in]
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, enum: [Bearer] }
+        expires_in: { type: integer, description: Seconds until access_token expiry }
+
+    BaselineSummary:
+      type: object
+      required: [project_id, provider, prompt_hash, approved_at]
+      properties:
+        project_id: { type: string, description: SHA-256 hash of project CWD }
+        provider: { type: string, enum: [anthropic, openai] }
+        prompt_hash: { type: string, pattern: '^[a-f0-9]{64}$' }
+        approved_at: { type: string, format: date-time }
+        approved_by:
+          type: string
+          enum: [local, cloud_policy]
+
+    PolicyInput:
+      type: object
+      required: [name, rules]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 500 }
+        sensitivity:
+          type: string
+          enum: [strict, balanced, permissive]
+        rules:
+          type: array
+          items: { $ref: '#/components/schemas/PolicyRule' }
+          minItems: 1
+
+    Policy:
+      allOf:
+        - $ref: '#/components/schemas/PolicyInput'
+        - type: object
+          required: [id, created_at, updated_at]
+          properties:
+            id: { type: string, format: uuid }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+
+    PolicyRule:
+      type: object
+      required: [type, value]
+      properties:
+        type:
+          type: string
+          enum: [injection_pattern, exfiltration_pattern, exempt_pattern]
+          description: |
+            Cloud policies may distribute additional deterministic detector
+            patterns. They are never LLM rules — patterns are evaluated by
+            the local detector modules.
+        value:
+          type: string
+          description: Regex source (must compile in JavaScript)
+
+    EventInput:
+      type: object
+      additionalProperties: false
+      description: |
+        Allow-listed fields only. additionalProperties=false is enforced by
+        the server; any extra key causes a 400 with `errors[*]` listing the
+        offending key. Raw prompt content is NEVER permitted.
+      required:
+        - timestamp
+        - project_id
+        - provider
+        - detector_name
+        - decision
+        - prompt_hash
+        - severity
+      properties:
+        timestamp: { type: string, format: date-time }
+        project_id: { type: string }
+        provider: { type: string, enum: [anthropic, openai] }
+        detector_name:
+          type: string
+          enum:
+            - HashChangeDetector
+            - InjectionPatternDetector
+            - ExfiltrationDetector
+            - PermissionEscalationDetector
+            - DriftAlertDetector
+        decision:
+          type: string
+          enum: [clean, approved, blocked, timeout, bypass, exempt, rebaseline]
+        prompt_hash: { type: string, pattern: '^[a-f0-9]{64}$' }
+        severity: { type: string, enum: [info, warn, high] }
+
+    Event:
+      allOf:
+        - $ref: '#/components/schemas/EventInput'
+        - type: object
+          required: [id, received_at]
+          properties:
+            id: { type: string, format: uuid }
+            received_at: { type: string, format: date-time }
+
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error: { type: string }
+        message: { type: string }
+        details:
+          type: array
+          items: { type: string }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid credentials
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Too many requests
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
