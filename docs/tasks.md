@@ -45,11 +45,11 @@ stub. `.env.example`. CI workflow (`.github/workflows/ci.yml`) runs:
 
 **Acceptance:**
 
-- [ ] `npm install` + `npx vitest run` works on a clean clone
-- [ ] `tsconfig.json` has `"strict": true`
-- [ ] CI workflow runs all gates on push
-- [ ] LICENSE = Apache 2.0
-- [ ] `scripts/check-no-llm-calls.ts` exists and passes on empty `src/`
+- [x] `npm install` + `npx vitest run` works on a clean clone
+- [x] `tsconfig.json` has `"strict": true`
+- [x] CI workflow runs all gates on push
+- [x] LICENSE = Apache 2.0
+- [x] `scripts/check-no-llm-calls.ts` exists and passes on empty `src/`
 
 **RED commit:** `test(infra): RED — CI must run vitest + no-LLM-calls check`
 **GREEN commit:** `feat(infra): GREEN — scaffold TypeScript + Vitest + Fastify + CI`
@@ -77,10 +77,10 @@ Implement `src/proxy/server.ts`. The proxy accepts
 
 **Acceptance:**
 
-- [ ] All 4 happy-path tests pass
-- [ ] Memory delta across 100 sequential requests < 5 MB
-- [ ] No request body retained in memory after response completes
-- [ ] P50 overhead < 50ms vs. direct fake-upstream
+- [x] All 4 happy-path tests pass
+- [x] Memory delta across 100 sequential requests < 5 MB
+- [x] No request body retained in memory after response completes
+- [~] P50 overhead < 50ms vs. direct fake-upstream (blocked by: no timing benchmark test written; tracked in T1.2 follow-up)
 
 **RED commit:** `test(proxy): RED — proxy must forward POST /v1/messages and stream response unchanged`
 **GREEN commit:** `feat(proxy): GREEN — Fastify proxy with stream.pipeline forwarding`
@@ -105,9 +105,9 @@ Handles `system` as string OR array of content blocks.
 
 **Acceptance:**
 
-- [ ] 5 unit tests pass
-- [ ] Extractor is a pure function (no I/O, no async)
-- [ ] All extracted text preserved verbatim (no normalisation, no trimming)
+- [x] 5 unit tests pass
+- [x] Extractor is a pure function (no I/O, no async)
+- [x] All extracted text preserved verbatim (no normalisation, no trimming)
 
 **RED commit:** `test(extractor): RED — Anthropic extractor handles string and content-block system`
 **GREEN commit:** `feat(extractor): GREEN — Anthropic SystemPromptExtractor`

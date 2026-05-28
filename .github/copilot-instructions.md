@@ -141,8 +141,50 @@ docs-sync step before the final push. Treat docs as a first-class deliverable.
 | New API endpoint (cloud)          | `openapi.yaml`, `design.md` API section                                                                                  |
 | New `.agentsec/config.yaml` field | `src/config.ts`, `.agentsec/config.yaml.example`, `README.md`                                                            |
 | New scheduler/timer (Phase 2+)    | `.github/copilot-instructions.md` Scheduler Cadence (when added)                                                         |
+| Every sprint ships new features   | `CHANGELOG.md` — add a `## [Sprint N] — YYYY-MM-DD` section listing features, fixed blockers, and breaking changes        |
 
 Commit prefix for doc-only changes: `docs(<scope>): <description>`.
+
+---
+
+## Sprint Closeout Gate — Mandatory Pre-Push Checklist
+
+Before any sprint pushes to `origin/main`, every item below must be true:
+
+- [ ] `npx vitest run` passes locally (zero failures)
+- [ ] `npm run check:nollm` exits 0
+- [ ] `npm run check:trace` exits 0
+- [ ] `npm run lint` exits 0 (zero warnings)
+- [ ] `npx license-checker-rseidelsohn --production --onlyAllow "MIT;Apache-2.0;ISC;BSD-2-Clause;BSD-3-Clause;0BSD;CC0-1.0;Python-2.0;BlueOak-1.0.0"` exits 0
+- [ ] Every step in `.github/workflows/ci.yml` maps to a real `npm run <script>` or an installed devDep binary (no undefined scripts, no bare `npx X` where X is not in devDependencies)
+- [ ] Every sprint dep added this sprint is listed in `package.json` (not just present in `node_modules`)
+- [ ] `docs/tasks.md` — all finished tasks have `[x]` acceptance boxes; unfinished or blocked criteria use `[~] <criterion> (blocked by: <reason>; tracked in issue #N)`
+- [ ] `CHANGELOG.md` — sprint entry committed
+- [ ] At least one `docs(<scope>): ...` commit exists in the sprint's commits
+
+Closeout commit format: `docs(sprint-N): closeout — tasks.md + CHANGELOG + docs sync`
+
+---
+
+## Package & CI Integrity Standing Order
+
+All runtime and development dependencies for a sprint must be added to
+`package.json` **during T1.1 (scaffolding)** or **as the very first act of the
+sprint task that introduces them**, before the RED commit that first imports them.
+
+- Every `npm run X` in `.github/workflows/ci.yml` must map to a script in
+  `package.json`. A ci.yml that references an undefined script is a
+  build-breaking bug with the same severity as a failing test.
+- Every `npx X` in `.github/workflows/ci.yml` must correspond to a pinned
+  devDependency. Never run bare `npx X` for a tool that is not in `devDependencies`
+  — non-reproducible and network-dependent on CI runners.
+- ESLint must be configured from **T1.1**:
+  - devDeps: `eslint@^9`, `typescript-eslint@^8`
+  - config file: `eslint.config.mjs` using flat-config format
+  - script: `"lint": "eslint src/ tests/ scripts/ --max-warnings 0"`
+- `src/config.ts` is **T1.1 scope**, not T1.14. AGENTSEC_KEY validation (NFR-7)
+  must be in place before any proxy test. A proxy that starts with no key
+  violates the trust model from the first commit.
 
 ---
 
@@ -378,6 +420,33 @@ test('proxy survives cold → warm → warm transition', async () => {
 });
 ```
 
+### Pattern: Memory-Delta Test (required for any proxy-level task)
+
+Every task that modifies the proxy request hot path must include a test asserting
+that heap memory does not grow proportionally with request count:
+
+```ts
+test('heap does not grow > 5 MB across 100 sequential requests', async () => {
+  const proxy = await startProxy({ ... });
+  const opts = { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ system: 's', messages: [] }) };
+
+  // Warm-up: settle JIT and connection pool before measuring.
+  for (let i = 0; i < 5; i++) { const r = await fetch(`${proxy.url}/v1/messages`, opts); await r.text(); }
+
+  const before = process.memoryUsage().heapUsed;
+  for (let i = 0; i < 100; i++) {
+    const r = await fetch(`${proxy.url}/v1/messages`, opts);
+    await r.text(); // must consume body so the stream is released
+  }
+  const deltaMB = (process.memoryUsage().heapUsed - before) / 1024 / 1024;
+  expect(deltaMB).toBeLessThan(5);
+});
+```
+
+T1.2 acceptance criterion "Memory delta < 5MB across 100 requests" is **not
+satisfied** until this test exists and passes.
+
 ---
 
 ## Detector Testing Pattern
@@ -462,5 +531,10 @@ A task is **done** when, and only when, every line below is true:
 7. ☐ The code obeys the security coding standards (no key logging, no
    plaintext-on-disk, no `eval`, etc.).
 8. ☐ No `TODO` or commented-out code remains in the diff.
+9. ☐ **Every acceptance criterion checkbox in `docs/tasks.md` for this task is
+   marked `[x]`.** If a criterion cannot be met, replace `[ ]` with
+   `[~] <criterion> (blocked by: <reason>; tracked in issue #N)`.
+   Leaving boxes unchecked means the task is ambiguous — not done.
+10. ☐ `CHANGELOG.md` has an entry for the sprint this task belongs to.
 
 If any line is unchecked, the task is not done.
